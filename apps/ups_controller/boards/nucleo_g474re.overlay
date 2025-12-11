@@ -1,0 +1,189 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Copyright (c) 2023 STMicroelectronics
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/dma/stm32_dma.h>
+#include <zephyr/dt-bindings/clock/stm32_clock.h>
+#include <zephyr/dt-bindings/clock/stm32g4_clock.h>
+#include <zephyr/dt-bindings/clock/stm32_common_clocks.h>
+#include <zephyr/dt-bindings/timer/stm32-timer.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
+
+/ {
+	zephyr,user {
+		/* adjust channel number according to pinmux in board.dts */
+		io-channels = <&adc1 1>, <&adc1 2>, <&adc1 3>, <&adc1 4>, <&adc3 1>;
+		dac1 = <&dac1>;
+		dac2 = <&dac2>;
+		dac-channel-id  = <1>;
+		dac-resolution = <12>;
+	};
+};
+
+/ {
+	buttons {
+		compatible = "gpio-keys";
+		button0: button_0 {
+			gpios = <&gpiob 15 (GPIO_ACTIVE_LOW)>;
+//			zephyr,code = <INPUT_BTN_0>;
+			label = "On-Off";
+		};
+		button1: button_1 {
+			gpios = <&gpiob 14 (GPIO_ACTIVE_LOW)>;
+//			zephyr,code = <INPUT_BTN_1>;
+			label = "Mute";
+		};
+	};
+};
+
+&clk_hse {
+	status = "disabled";
+};
+
+&clk_hsi {
+	clock-frequency = <16000000>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <80000000>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+	apb2-prescaler = <1>;
+};
+
+&pll {
+	div-m = <1>;
+	mul-n = <20>;
+	div-p = <7>;
+	div-r = <4>;
+	div-q = <2>;
+	clocks = < &clk_hsi >;
+	status = "okay";
+};
+
+&smbus3 {
+	status = "okay";
+};
+
+/* before we can use all of the A/D channels on ADC1 we have to move the serial console */
+
+/* these two could conflict with alternate uses of their pins defined elsewhere */
+&lpuart1 {
+	status = "disabled";
+};
+
+&i2c1 {
+	status = "disabled";
+};
+
+
+&uart4 {
+	pinctrl-0 = <&uart4_tx_pc10 &uart4_rx_pc11>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+/ {
+	chosen {
+		zephyr,console = &uart4;
+		zephyr,shell-uart = &uart4;
+		zephyr,uart-mcumgr = &uart4;
+	};
+};
+
+&adc1 {
+	st,adc-clock-source = "SYNC"; //async mode doesn't appear to be set up
+	st,adc-prescaler = <4>;
+//	clocks = <&pll>;
+	status = "okay";
+	vref-mv = <3000>; //Zephyr reference is always tied to +VREF pin on STM32
+	pinctrl-0 = <&adc1_in1_pa0 &adc1_in2_pa1 &adc1_in3_pa2 &adc1_in4_pa3>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+	
+	channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+
+	channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+
+	channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+};
+
+&adc3 {
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <4>;
+	vref-mv = <3000>;
+	pinctrl-0 = <&adc3_in1_pb1>;
+	pinctrl-names = "default";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+};
+	
+
+&dac1 {
+	pinctrl-0 = <&dac1_out1_pa4>; /* can't use 2nd channel, conflicts with SPI */
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&dac2 {
+	pinctrl-0 = <&dac2_out1_pa6>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&i2c3 {
+	pinctrl-0 = <&i2c3_scl_pc8 &i2c3_sda_pc9>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>; // _FAST = 400KHz, some STM32 mcu's have problems with 100KHz
+	status = "okay";
+};
+
+&spi1 {
+	pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pb4 &spi1_mosi_pb5>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioa 15 ((1 << 0) | (1 << 4))>;
+	status = "okay";
+};
