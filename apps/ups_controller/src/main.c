@@ -82,12 +82,12 @@ static const struct adc_dt_spec adc_channels[] = {
 #define VC_SUPPLY_VOLT 0.003662 // These two incorporate a divide by 5 in external HW in the supply, ADC measurement
 #define VC_INVERTER_BOOST_CURRENT_MEAS 0.0061035  // adc 4 LSB, full scale = 25A ADC measurement
 #define VC_SUPPLY_VOLTAGE_MEAS 0.0036621 // adc 3 lsb, full scale = 15V
-#define BATT_FLOAT_VOLTAGE 13.8
+#define BATT_FLOAT_VOLTAGE 13.73 //supposed to be 13.8 but I'm fiddling to get an exact 13.8V value during testing
 #define BATT_MAX_CHG_VOLTAGE 14.4
 #define BATT_MAX_CHG_CURRENT 15  //in mA note. for now, depends on how much oomph VC can give us plus inverter
 #define BATT_MIN_CHG_CURRENT 5  //purely arbitrary
 #define VC_SUPPLY_MIN_VOLTAGE 12.5  //lower than this the Dc Dc boost for inverter will start to fall over at full load
-#define BATT_MAX_SOC 99  //as in 99% which is when we switch to float charging.
+#define BATT_MAX_SOC 98  //as in 98% is when we switch to float charging.
 #define MAX_TOTAL_VC_CURRENT 20000 //mA  Safe value for now.
 #define INVERTER_START_WAIT_TIME 500 // milliseconds
 #define MAX_BATT_DISCH_CURRENT 20000 //maximum continuous current.
@@ -367,13 +367,13 @@ void batt_svc_handler(struct k_work *work)
 
 	load_batt_info(&batt_info, i2c_dev);
 	LOG_INF("System temp: %d", sys_temp);
-	LOG_INF("Batt temp: %d", batt_info.temperature);
-	LOG_INF("Batt voltage: %d", batt_info.voltage);
-	LOG_INF("Batt current: %d", batt_info.current);
-	LOG_INF("Batt avg current: %d", batt_info.avg_current);
-	LOG_INF("Batt SOC: %d", batt_info.state_of_chg);
-	LOG_INF("Remaining capacity: %d", batt_info.remaining_capacity);
-	LOG_INF("Average time to empty: %d", batt_info.avg_time_to_empty);
+	LOG_INF("Batt temp: %.2fC", (double)(batt_info.temperature/10) - 273.15);
+	LOG_INF("Batt voltage: %.2fV.", (double)(batt_info.voltage)/1000.0);
+	LOG_INF("Batt current: %dmA", batt_info.current);
+	LOG_INF("Batt avg current: %dmA", batt_info.avg_current);
+	LOG_INF("Batt SOC: %d percent", batt_info.state_of_chg);
+	LOG_INF("Remaining capacity: %dmAh", batt_info.remaining_capacity);
+	LOG_INF("Average time to empty: %d minutes", batt_info.avg_time_to_empty);
 	LOG_INF("Batt status: %d", batt_info.batt_stats);
 // Update LED array:
 	if (ac_mode) { //when charging
@@ -420,6 +420,7 @@ void batt_svc_handler(struct k_work *work)
 			leds_array[4].state = true;
 			leds_array[4].flashing = false;
 			leds_array[5].state = true;
+			leds_array[5].flashing = false;
 		}
 	}
 	else {
@@ -663,9 +664,7 @@ static void s_on_chg_entry(void *o)
 	gpio_set(GPIO_AC_OUT_LED, 0);
 	ac_mode = true; // Used by the LEDs rourine in the background
 //	We may have come here from a state where the batt svc timer was already running
-	if (k_timer_status_get(&my_timer) == 0 && k_timer_remaining_get(&my_timer) == 0) {
-		k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
-	}
+	k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
 	gpio_set(GPIO_VC_TO_VINA_EN, 1); //connect battery to analog circuitry
 
 	tx_buf[0] = BATT_SOC;
@@ -801,6 +800,7 @@ static void s_on_full_entry(void *o)
 	s->state_entry_time_ms = k_uptime_get();  //seed inverter startup timeout
 	gpio_set(GPIO_INVERTER_ENABLE, 1); // Inverter on
 	gpio_set(GPIO_AC_OUT_LED, 1);
+	k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
 	k_work_submit(&batt_svc); //update all the LEDs
 	LOG_INF("Entering the ON state and Charging...");
 }
@@ -949,6 +949,7 @@ static void s_on_float_entry(void *o)
 		LOG_ERR("DAC write failed in state on_float_entry.  Can't set VC voltage.");
 	}
 	gpio_set(GPIO_AC_OUT_LED, 1);
+	k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
 	k_work_submit(&batt_svc);
 	LOG_INF("Entering RUN state but float charging...");		
 }
@@ -1019,9 +1020,7 @@ static void s_on_battery_entry(void *o)
 	gpio_set(GPIO_INVERTER_ENABLE, 1); // Inverter on
 	ac_mode = false;
 // If we came here from the OFF state timer will need to be started for LED service
-	if (k_timer_status_get(&my_timer) == 0 && k_timer_remaining_get(&my_timer) == 0) {
-		k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
-	}
+	k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
 	gpio_set(GPIO_AC_OUT_LED, 1);
 	k_work_submit(&batt_svc);
 	LOG_INF("Entering the ON BATTERY state...");
@@ -1139,10 +1138,6 @@ int main(void)
 	gpio_init();
 //NOTE: when we are in standby state, powered off, with no AC input, we don't start the battery service,
 //      and we shut it down when entering low power standby (on/off OFF, no AC input)
-
-//	Do this inside one of the states instead
-//	printk("Starting batt svc timer service\n");
-//	k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
 
 	msecs_count = 0;
 	s_obj.debug = false;
