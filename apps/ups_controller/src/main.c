@@ -801,6 +801,7 @@ static void s_on_full_entry(void *o)
 	s->state_entry_time_ms = k_uptime_get();  //seed inverter startup timeout
 	gpio_set(GPIO_INVERTER_ENABLE, 1); // Inverter on
 	gpio_set(GPIO_AC_OUT_LED, 1);
+	k_work_submit(&batt_svc); //update all the LEDs
 	LOG_INF("Entering the ON state and Charging...");
 }
 
@@ -881,7 +882,6 @@ enum smf_state_result s_on_full_run(void *o)
 	if (s->batt_state_of_chg < BATT_MAX_SOC) {  // then we have to run the charging loop
 		// voltage to charge level, we came in with it set to float
 		s->dac_vc_volt = real_to_raw(VC_SUPPLY_CTRL_V, (BATT_MAX_CHG_VOLTAGE - VC_SUPPLY_CTRL_V_OFFSET));
-		LOG_DBG("VC voltage control raw value: %d", s->dac_vc_volt);
 		int ret = dac_write_value(dac_dev[DAC_VC_VOLT], DAC_CHANNEL_ID, s->dac_vc_volt);
 		if (ret != 0) {
 			LOG_ERR("DAC write failed in state on_full_run.  Can't set VC voltage.");
@@ -893,15 +893,12 @@ enum smf_state_result s_on_full_run(void *o)
 			LOG_ERR("Could not read ADC in on_full_run state.");
 		}
 		raw_inv_current = (uint16_t)buf;  //raw value from A/D for VC, must translate it
-		LOG_DBG("raw inv cur: %d", raw_inv_current);
 		real_inv_current = raw_to_real(VC_INVERTER_BOOST_CURRENT_MEAS, raw_inv_current); // A/D returns fractions of Amps 
-		LOG_DBG("real inv cur: %f", real_inv_current);
 
 		reserve_current = MAX_TOTAL_VC_CURRENT - real_inv_current;
 
 		if (reserve_current > s->desired_chg_current) { //plenty of oomph to charge the batt
 			s->dac_batt_current = real_to_raw(VC_SUPPLY_CURR_LIMIT, s->desired_chg_current);
-			LOG_DBG("Batt chg current raw val: %d", s->dac_batt_current);
 			int ret = dac_write_value(dac_dev[DAC_CHG_CURRENT], DAC_CHANNEL_ID, s->dac_batt_current);
 			if (ret != 0) {
 				LOG_ERR("dac write failed in state on_full_run.  Can't set current limit");		
@@ -921,14 +918,12 @@ enum smf_state_result s_on_full_run(void *o)
 	}
 	else {
 		s->dac_vc_volt = real_to_raw(VC_SUPPLY_CTRL_V, (BATT_FLOAT_VOLTAGE - VC_SUPPLY_CTRL_V_OFFSET));
-		LOG_DBG("VC voltage control raw value: %d", s->dac_vc_volt);
 		int ret = dac_write_value(dac_dev[DAC_VC_VOLT], DAC_CHANNEL_ID, s->dac_vc_volt);
 		if (ret != 0) {
 			LOG_ERR("DAC write failed in state on_full_run.  Can't set VC voltage.");
 		}
 
 		s->dac_batt_current = real_to_raw(VC_SUPPLY_CURR_LIMIT, s->desired_chg_current);
-		LOG_DBG("VC voltage control raw value: %d", s->dac_batt_current);
 		ret = dac_write_value(dac_dev[DAC_CHG_CURRENT], DAC_CHANNEL_ID, s->dac_batt_current);
 		if (ret != 0) {
 			LOG_ERR("dac write failed in state on_full_run.  Can't set current limit");		
@@ -954,6 +949,7 @@ static void s_on_float_entry(void *o)
 		LOG_ERR("DAC write failed in state on_float_entry.  Can't set VC voltage.");
 	}
 	gpio_set(GPIO_AC_OUT_LED, 1);
+	k_work_submit(&batt_svc);
 	LOG_INF("Entering RUN state but float charging...");		
 }
 
@@ -1027,6 +1023,7 @@ static void s_on_battery_entry(void *o)
 		k_timer_start(&my_timer, K_SECONDS(10), K_SECONDS(10));
 	}
 	gpio_set(GPIO_AC_OUT_LED, 1);
+	k_work_submit(&batt_svc);
 	LOG_INF("Entering the ON BATTERY state...");
 
 // inverter on, running on battery
@@ -1057,6 +1054,7 @@ enum smf_state_result s_on_battery_run(void *o)
 	}
 	
 	if (gpio_get(GPIO_AC_INPUT_DETECT)) {
+		LOG_DBG("Detected AC input in on_batt_run state.");
 		SET_STATE(ON_FULL_CHG);
 		return SMF_EVENT_HANDLED;
 	}
@@ -1150,6 +1148,8 @@ int main(void)
 	s_obj.debug = false;
 	s_obj.next = true;
 	smf_set_initial(SMF_CTX(&s_obj), &ups_states[OFF]);
+	load_batt_info(&batt_info, i2c_dev); // prime the system in case there's no AC right now
+	LOG_INF("Batt SOC: %d", batt_info.state_of_chg);
 
 // In main we run the state machine state monitor every 10mSec.  We also update the front panel
 // LEDs once every half second in order to implement flashing.  LEDs themselves update only once every
